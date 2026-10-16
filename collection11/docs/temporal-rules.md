@@ -541,7 +541,7 @@ each window sees the result of the previous one.
 python -m pytest tests -v
 ```
 
-**48 tests, all passing** (verified on 2026-10-15). They run offline, without Earth Engine
+**50 tests, all passing** (verified on 2026-10-16). They run offline, without Earth Engine
 credentials.
 
 | Group | What it covers |
@@ -557,6 +557,7 @@ credentials.
 | 9. Run-first ordering | The 5/3 marks from Step 1b survive KERNEL4 and KERNEL4_SECONDARY |
 | 10. Tail guard | Removes frequency-induced 3; preserves recovery(5) and confirmed 3 |
 | 11. Regression | All-anthropic / all-vegetation series; missing `min_start` raises an error |
+| 12. Frequency correction | The anthropic frequency is cumulative up to each year: vegetation before the first anthropic year stays primary; 4 → 6 only after 2+ anthropic years |
 
 > The rules are loaded **from the source code via AST** (`load_rules_from_source`), without
 > importing the pipeline — which avoids `ee.Initialize()` in the tests and ensures that the

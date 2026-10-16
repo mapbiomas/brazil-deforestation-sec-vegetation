@@ -118,9 +118,15 @@ def run_full_pipeline(initial, run_end_rules=True, run_blip_filter=True):
     Single-pixel simulation of export_deforestation(), faithful to the GEE pipeline.
 
     `initial` maps year → aggregated class (1/2/7/0), covering FULL_YEARS.
-    Frequency is computed from `initial` (the aggregated image, before kernel rules).
+    Frequency is computed from `initial` (the aggregated image, before kernel rules)
+    and is CUMULATIVE up to each year, inclusive — get_class_frequency() returns one
+    band per year with the running count, not the total of the series.
     """
-    freq_anthropic = sum(1 for y in FULL_YEARS if initial[y] == CLASS_ANTHROPIC)
+    freq_anthropic = {}
+    running = 0
+    for y in FULL_YEARS:
+        running += initial[y] == CLASS_ANTHROPIC
+        freq_anthropic[y] = running
     s = dict(initial)
 
     # Step 1a: blip filter (all years)
@@ -142,9 +148,9 @@ def run_full_pipeline(initial, run_end_rules=True, run_blip_filter=True):
 
     # Step 6: frequency correction
     for y in FULL_YEARS:
-        if freq_anthropic > 1 and s[y] == CLASS_PRIMARY_VEG_SUPPRESSION:
+        if freq_anthropic[y] > 1 and s[y] == CLASS_PRIMARY_VEG_SUPPRESSION:
             s[y] = CLASS_SECONDARY_VEG_SUPPRESSION
-        if freq_anthropic > 0 and s[y] == CLASS_PRIMARY_VEGETATION:
+        if freq_anthropic[y] > 0 and s[y] == CLASS_PRIMARY_VEGETATION:
             s[y] = CLASS_SECONDARY_VEGETATION
 
     # Step 7: tail guard — strip frequency-induced secondary veg whose immediate
@@ -552,6 +558,29 @@ def test_pipeline_all_vegetation():
     out = run_full_pipeline(s)
     # All vegetation, freq_anthropic=0 → freq correction writes no secondary
     assert all(out[y] == CLASS_PRIMARY_VEGETATION for y in FULL_YEARS)
+
+
+def test_frequency_correction_is_cumulative():
+    # Primary vegetation BEFORE the first anthropic year stays primary: the frequency
+    # is the running count up to each year, as get_class_frequency() builds it. With
+    # the total of the series, 1985–1999 would wrongly become secondary vegetation.
+    s = {y: (CLASS_PRIMARY_VEGETATION if y < 2000 else CLASS_ANTHROPIC) for y in FULL_YEARS}
+    out = run_full_pipeline(s)
+    assert all(out[y] == CLASS_PRIMARY_VEGETATION for y in range(1985, 2000))
+    assert out[2000] == CLASS_PRIMARY_VEG_SUPPRESSION  # first anthropic year, frequency 1
+    assert all(out[y] == CLASS_ANTHROPIC for y in range(2001, 2026))
+
+
+def test_frequency_correction_suppression_after_two_anthropic_years():
+    # Suppression after 2+ anthropic years becomes secondary suppression (4 → 6).
+    s = {y: CLASS_PRIMARY_VEGETATION for y in FULL_YEARS}
+    for y in (1990, 1991):
+        s[y] = CLASS_ANTHROPIC
+    for y in range(2010, 2026):
+        s[y] = CLASS_ANTHROPIC
+    out = run_full_pipeline(s)
+    assert out[2010] == CLASS_SECONDARY_VEG_SUPPRESSION
+    assert all(out[y] == CLASS_PRIMARY_VEGETATION for y in range(1985, 1990))
 
 
 def test_missing_min_start_raises():
