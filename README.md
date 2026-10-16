@@ -1,31 +1,31 @@
-# MapBiomas Brasil — Desmatamento e Vegetação Secundária
+# MapBiomas Brazil — Deforestation and Secondary Vegetation
 
-Código do mapeamento anual de **supressão de vegetação nativa** e **vegetação secundária** do
-MapBiomas Brasil, derivado dos mapas de cobertura e uso da terra por regras temporais aplicadas
-pixel a pixel.
+Code for MapBiomas Brazil's annual mapping of **native vegetation suppression** and **secondary
+vegetation**, derived from the land use and land cover maps by temporal rules applied pixel by
+pixel.
 
-| Coleção | Série | Implementação | Pasta |
+| Collection | Series | Implementation | Folder |
 |---|---|---|---|
-| **Collection 11** | 1985–2025 (público a partir de 1987) | Python, Earth Engine API | [`collection11/`](collection11/) |
+| **Collection 11** | 1985–2025 (public from 1987) | Python, Earth Engine API | [`collection11/`](collection11/) |
 | Collection 9 | 1985–2023 | JavaScript, Code Editor | [`collection9/`](collection9/) |
 
-Comece pela [Collection 11](collection11/README.md).
+Start with [Collection 11](collection11/README.md).
 
 ## Classes
 
-| Código | Classe |
+| Code | Class |
 |---|---|
-| 0 | Sem dado |
-| 1 | Antrópico |
-| 2 | Vegetação primária |
-| 3 | Vegetação secundária |
-| 4 | Supressão de vegetação primária |
-| 5 | Recuperação para vegetação secundária |
-| 6 | Supressão de vegetação secundária |
-| 7 | Outras transições |
+| 0 | No data |
+| 1 | Anthropic |
+| 2 | Primary vegetation |
+| 3 | Secondary vegetation |
+| 4 | Primary vegetation suppression |
+| 5 | Recovery to secondary vegetation |
+| 6 | Secondary vegetation suppression |
+| 7 | Other transitions |
 
-## Dado público
+## Public data
 
 `projects/mapbiomas-public/assets/brazil/lulc/collection11/mapbiomas_brazil_collection11_deforestation_secondary_vegetation_v5`
-— uma banda `classification_{ano}` por ano, 1987–2025. Ver
+— one `classification_{year}` band per year, 1987–2025. See
 [collection11/docs/products.md](collection11/docs/products.md).

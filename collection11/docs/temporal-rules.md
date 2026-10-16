@@ -1,182 +1,182 @@
-# Desmatamento & Vegetação Secundária — Regras Temporais
+# Deforestation & Secondary Vegetation — Temporal Rules
 
-**MapBiomas Brasil · Collection 11 · série 1985–2025 (41 anos)**
+**MapBiomas Brazil · Collection 11 · 1985–2025 series (41 years)**
 
-Este documento descreve as regras temporais aplicadas para detectar desmatamento e dinâmica de
-vegetação secundária. As regras são implementadas em
+This document describes the temporal rules applied to detect deforestation and secondary
+vegetation dynamics. The rules are implemented in
 [`deforestation_secondary_vegetation.py`](../deforestation_secondary_vegetation.py)
-e invocadas por `export_deforestation()` em
+and invoked by `export_deforestation()` in
 [`mapbiomas_brazil_deforestation_secondary_vegetation.py`](../mapbiomas_brazil_deforestation_secondary_vegetation.py).
 
-A entrada é a imagem de integração da Collection 11 (`INTEGRATION/classification-ft`, filtrada pela
-versão em `VERSION_INPUT_INTEGRATION`), com uma banda `classification_{ano}` por ano. A saída tem as
-mesmas bandas, preenchidas com os 8 códigos simplificados da seção 1.
+The input is the Collection 11 integration image (`INTEGRATION/classification-ft`, filtered by the
+version in `VERSION_INPUT_INTEGRATION`), with one `classification_{year}` band per year. The output
+has the same bands, filled with the 8 simplified codes from section 1.
 
-> **Revisão 2** (11/08/2026). A revisão 1 descrevia a Collection 10.1, série até 2024 e quatro grupos
-> de regras — ver [§11](#11-histórico-de-problemas-resolvidos) para o que mudou e por quê.
-
----
-
-## Índice
-
-- [1. Legenda de classes](#1-legenda-de-classes)
-- [2. Formato das regras](#2-formato-das-regras)
-- [3. Tamanhos de kernel e janelas ancoradas](#3-tamanhos-de-kernel-e-janelas-ancoradas)
-- [4. O parâmetro `min_start`](#4-o-parâmetro-min_start)
-- [5. Ordem de processamento](#5-ordem-de-processamento)
-- [6. Grupos de regras](#6-grupos-de-regras)
-- [7. Pós-processamento](#7-pós-processamento)
-- [8. Comportamento no fim da série](#8-comportamento-no-fim-da-série)
-- [9. Validação e testes](#9-validação-e-testes)
-- [10. O que vem depois das regras temporais](#10-o-que-vem-depois-das-regras-temporais)
-- [11. Histórico de problemas resolvidos](#11-histórico-de-problemas-resolvidos)
-- [12. Referência rápida](#12-referência-rápida--todas-as-regras-em-ordem-de-execução)
+> **Revision 2** (2026-08-11). Revision 1 described Collection 10.1, a series up to 2024 and four
+> rule groups — see [§11](#11-history-of-resolved-problems) for what changed and why.
 
 ---
 
-## 1. Legenda de classes
+## Table of contents
 
-Códigos simplificados usados internamente pelo pipeline de desmatamento, depois da agregação a
-partir da classificação original do MapBiomas via `aggregate_classes()`.
+- [1. Class legend](#1-class-legend)
+- [2. Rule format](#2-rule-format)
+- [3. Kernel sizes and anchored windows](#3-kernel-sizes-and-anchored-windows)
+- [4. The `min_start` parameter](#4-the-min_start-parameter)
+- [5. Processing order](#5-processing-order)
+- [6. Rule groups](#6-rule-groups)
+- [7. Post-processing](#7-post-processing)
+- [8. End-of-series behavior](#8-end-of-series-behavior)
+- [9. Validation and tests](#9-validation-and-tests)
+- [10. What comes after the temporal rules](#10-what-comes-after-the-temporal-rules)
+- [11. History of resolved problems](#11-history-of-resolved-problems)
+- [12. Quick reference](#12-quick-reference--all-rules-in-execution-order)
 
-| ID | Nome | Cor | Descrição |
+---
+
+## 1. Class legend
+
+Simplified codes used internally by the deforestation pipeline, after aggregation from the original
+MapBiomas classification via `aggregate_classes()`.
+
+| ID | Name | Color | Description |
 |----|------|-----|-----------|
-| 0 | No Data | `#FFFFFF` | Pixels não observados ou mascarados |
-| 1 | Anthropic | `#FAF5D1` | Qualquer uso antrópico (pastagem, agricultura, urbano, mineração…) |
-| 2 | Primary Veg. | `#C7E4CB` | Vegetação nativa sem histórico antrópico anterior |
-| 3 | Secondary Veg. | `#5BCF20` | Regeneração sobre área anteriormente antrópica |
-| 4 | Primary Suppression | `#EA1C1C` | Evento confirmado de supressão de vegetação primária |
-| 5 | Recovery to Secondary | `#B4F792` | Primeiro ano de regeneração após uso antrópico |
-| 6 | Secondary Suppression | `#FE9934` | Evento de supressão sobre vegetação secundária |
-| 7 | Other Transitions | `#303149` | Água, afloramento rochoso, praia, ruído filtrado |
+| 0 | No Data | `#FFFFFF` | Unobserved or masked pixels |
+| 1 | Anthropic | `#FAF5D1` | Any anthropic use (pasture, agriculture, urban, mining…) |
+| 2 | Primary Veg. | `#C7E4CB` | Native vegetation with no prior anthropic history |
+| 3 | Secondary Veg. | `#5BCF20` | Regeneration over a previously anthropic area |
+| 4 | Primary Suppression | `#EA1C1C` | Confirmed primary vegetation suppression event |
+| 5 | Recovery to Secondary | `#B4F792` | First year of regeneration after anthropic use |
+| 6 | Secondary Suppression | `#FE9934` | Suppression event over secondary vegetation |
+| 7 | Other Transitions | `#303149` | Water, rocky outcrop, beach, filtered noise |
 
-### 1.1 Agregação das classes originais
+### 1.1 Aggregation of the original classes
 
-O mapeamento vive em `CLASS_LOOKUP` no pipeline e é aplicado banda a banda por
-`aggregate_classes()`, que usa `remap(..., default=0)` — **qualquer classe ausente do lookup vira
-No Data (0)**.
+The mapping lives in `CLASS_LOOKUP` in the pipeline and is applied band by band by
+`aggregate_classes()`, which uses `remap(..., default=0)` — **any class missing from the lookup
+becomes No Data (0)**.
 
-| Classe agregada | IDs originais do MapBiomas |
+| Aggregated class | Original MapBiomas IDs |
 |---|---|
-| **1 — Anthropic** | 9 (silvicultura), 14 (agropecuária), 15 (pastagem), 18/19/20/39/40/41/62 (lavoura temporária), 36/35/46/47/48 (lavoura perene), 72, 21 (mosaico de usos), 22 (área não vegetada), 24 (urbano), 25 (outras áreas não vegetadas), 30 (mineração), 31 (aquicultura), 75 (usina fotovoltaica), 91 (usina eólica) |
-| **2 — Primary Veg.** | 1, 3 (formação florestal), 4 (formação savânica), 5 (mangue), 6 (floresta alagável), 7 (savana alagável), 10, 11 (área úmida), 12 (campo), 13 (mosaico herbáceo-arbustivo), 49 (restinga arbórea), 50 (restinga herbácea), 66, 70, 84 (marisma) |
-| **7 — Other Transitions** | 23 (praia/duna), 26 (água), 29 (afloramento rochoso), 32 (planície hipersalina), 33 (rio/lago/oceano), 34, 61, 68, 69 |
-| **0 — No Data** | 0, 27 (não observado) |
+| **1 — Anthropic** | 9 (forest plantation), 14 (farming), 15 (pasture), 18/19/20/39/40/41/62 (temporary crop), 36/35/46/47/48 (perennial crop), 72, 21 (mosaic of uses), 22 (non-vegetated area), 24 (urban), 25 (other non-vegetated areas), 30 (mining), 31 (aquaculture), 75 (photovoltaic power plant), 91 (wind power plant) |
+| **2 — Primary Veg.** | 1, 3 (forest formation), 4 (savanna formation), 5 (mangrove), 6 (floodable forest), 7 (floodable savanna), 10, 11 (wetland), 12 (grassland), 13 (herbaceous-shrub mosaic), 49 (wooded sandbank vegetation), 50 (herbaceous sandbank vegetation), 66, 70, 84 (salt marsh) |
+| **7 — Other Transitions** | 23 (beach/dune), 26 (water), 29 (rocky outcrop), 32 (hypersaline tidal flat), 33 (river/lake/ocean), 34, 61, 68, 69 |
+| **0 — No Data** | 0, 27 (not observed) |
 
-⚠️ **As classes 75 (fotovoltaica) e 91 (eólica) entraram na Collection 11** e foram adicionadas ao
-lookup como antrópico. Toda classe nova da legenda precisa entrar em `CLASS_LOOKUP` explicitamente:
-sem isso, o `default=0` do `remap` a transforma em No Data e o pixel some da série de desmatamento
-sem nenhum aviso.
+⚠️ **Classes 75 (photovoltaic) and 91 (wind) entered in Collection 11** and were added to the
+lookup as anthropic. Every new legend class must be added to `CLASS_LOOKUP` explicitly: without
+that, the `remap`'s `default=0` turns it into No Data and the pixel disappears from the
+deforestation series without any warning.
 
-> **O lookup consome o dado interno, não o público.** Na C11 o produto público remapeia 13 → 77
-> (`PUBLIC_COVERAGE_REMAP`), mas os assets internos — que alimentam estas regras — mantêm o 13. Um
-> pipeline reconstruído a partir do dado **público** precisaria mapear o 77 explicitamente. O lookup
-> também carrega IDs que não existem na legenda do Brasil (34, 61, 66, 68, 69, 70, 72), herdados do
-> lookup compartilhado com outras regiões; são inofensivos.
+> **The lookup consumes the internal data, not the public data.** In C11 the public product remaps
+> 13 → 77 (`PUBLIC_COVERAGE_REMAP`), but the internal assets — which feed these rules — keep the 13.
+> A pipeline rebuilt from the **public** data would need to map 77 explicitly. The lookup also
+> carries IDs that do not exist in Brazil's legend (34, 61, 66, 68, 69, 70, 72), inherited from the
+> lookup shared with other regions; they are harmless.
 
 ---
 
-## 2. Formato das regras
+## 2. Rule format
 
-Cada regra é uma lista Python com três elementos:
+Each rule is a Python list with three elements:
 
 ```python
 [kernel_bef, kernel_aft, min_start]
 ```
 
-| Campo | Tipo | Obrigatório | Descrição |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `kernel_bef` | `list[int]` | sim | Sequência de classes que deve casar com a entrada (estado antes) |
-| `kernel_aft` | `list[int]` | sim | Sequência de classes a escrever quando casa (estado depois) |
-| `min_start` | `int` | **sim** | Índice mínimo da lista de anos a partir do qual a regra pode ser aplicada |
+| `kernel_bef` | `list[int]` | yes | Sequence of classes that must match the input (before state) |
+| `kernel_aft` | `list[int]` | yes | Sequence of classes to write when it matches (after state) |
+| `min_start` | `int` | **yes** | Minimum index in the year list from which the rule can be applied |
 
-> **Enforcement:** `min_start` é obrigatório. `apply_rule_kernel_3`, `_4` e `_6` levantam `ValueError`
-> se o terceiro elemento estiver ausente, evitando erro silencioso em regra não revisada.
+> **Enforcement:** `min_start` is required. `apply_rule_kernel_3`, `_4` and `_6` raise `ValueError`
+> if the third element is missing, preventing a silent error in an unreviewed rule.
 
 ```python
 [[1, 2, 2, 2], [1, 5, 3, 3], 1]
-#  ↑ antes      ↑ depois      ↑ min_start=1 → a primeira janela válida começa em 1986
+#  ↑ before     ↑ after       ↑ min_start=1 → the first valid window starts in 1986
 ```
 
-Para um kernel de 4 anos, os índices de posição mapeiam para anos assim:
+For a 4-year kernel, the position indices map to years as follows:
 
 ```
-índice:  i=0   i=1   i=2   i=3
+index:   i=0   i=1   i=2   i=3
          t1    t2    t3    t4
-         1985  1986  1987  1988   ← janela começando no índice 0
-         1986  1987  1988  1989   ← janela começando no índice 1 (min_start=1)
+         1985  1986  1987  1988   ← window starting at index 0
+         1986  1987  1988  1989   ← window starting at index 1 (min_start=1)
 ```
 
 ---
 
-## 3. Tamanhos de kernel e janelas ancoradas
+## 3. Kernel sizes and anchored windows
 
-`apply_rules(rules, kernel_size, years_override=None)` aceita `kernel_size` **3, 4 ou 6**,
-despachando para `apply_rule_kernel_3/4/6`. Qualquer outro valor levanta `ValueError`. Cada método é
-uma janela móvel sobre `ee.List.sequence(0, len(years) - kernel_size)`.
+`apply_rules(rules, kernel_size, years_override=None)` accepts `kernel_size` **3, 4 or 6**,
+dispatching to `apply_rule_kernel_3/4/6`. Any other value raises `ValueError`. Each method is a
+moving window over `ee.List.sequence(0, len(years) - kernel_size)`.
 
-| Modo | Como é chamado | Nº de janelas | Usado por |
+| Mode | How it is called | No. of windows | Used by |
 |---|---|---|---|
-| **Deslizante** | sem `years_override` (usa `YEARS`) | `len(YEARS) - k + 1` | blip, KERNEL4, KERNEL4_SECONDARY, KERNEL3_SECONDARY |
-| **Ancorada** | `years_override` com exatamente `k` elementos | 1 (índice 0) | KERNEL6_SECONDARY_END, KERNEL4_SECONDARY_END_REVERT |
-| **Restrita** | `years_override` com mais de `k` elementos | `len(override) - k + 1` | KERNEL4_END (4 anos sobre 4 → 1 janela) |
+| **Sliding** | without `years_override` (uses `YEARS`) | `len(YEARS) - k + 1` | blip, KERNEL4, KERNEL4_SECONDARY, KERNEL3_SECONDARY |
+| **Anchored** | `years_override` with exactly `k` elements | 1 (index 0) | KERNEL6_SECONDARY_END, KERNEL4_SECONDARY_END_REVERT |
+| **Restricted** | `years_override` with more than `k` elements | `len(override) - k + 1` | KERNEL4_END (4 years over 4 → 1 window) |
 
-⚠️ **`min_start` é um índice na lista efetivamente usada**, não em `YEARS`. Com
-`years_override=YEARS[-6:]`, `min_start=0` significa "a partir de 2020" — não "a partir de 1985". É
-por isso que as regras ancoradas do Step 1b podem usar `min_start=0` com segurança mesmo escrevendo
-classes 3 e 5.
+⚠️ **`min_start` is an index into the list actually used**, not into `YEARS`. With
+`years_override=YEARS[-6:]`, `min_start=0` means "from 2020 onward" — not "from 1985 onward". That
+is why the anchored rules of Step 1b can safely use `min_start=0` even though they write classes 3
+and 5.
 
-### 3.1 Aplicação sequencial — por que a ordem importa
+### 3.1 Sequential application — why order matters
 
-Cada regra roda como um `iterate` sobre as janelas, e cada janela enxerga o resultado escrito pela
-janela anterior. Da mesma forma, cada grupo opera sobre a imagem já modificada pelo grupo anterior.
+Each rule runs as an `iterate` over the windows, and each window sees the result written by the
+previous window. Likewise, each group operates on the image already modified by the previous group.
 
-- Uma regra pode **habilitar** outra: `RULES_KERNEL3_SECONDARY` depende da classe 3 em `t1`, que só
-  existe se `RULES_KERNEL4_SECONDARY` já a tiver escrito.
-- Uma regra pode **inviabilizar** outra: é exatamente o motivo de os Steps 1a/1b rodarem antes de
-  tudo (ver [§5](#5-ordem-de-processamento)).
+- One rule can **enable** another: `RULES_KERNEL3_SECONDARY` depends on class 3 in `t1`, which only
+  exists if `RULES_KERNEL4_SECONDARY` has already written it.
+- One rule can **disable** another: that is exactly why Steps 1a/1b run before everything else
+  (see [§5](#5-processing-order)).
 
-### Constantes de período
+### Period constants
 
-| Constante | Valor | Usada em |
+| Constant | Value | Used in |
 |---|---|---|
-| `YEARS` | 1985–2025 (41 anos) | todas as regras deslizantes |
+| `YEARS` | 1985–2025 (41 years) | all sliding rules |
 | `YEARS_END` | `YEARS[-4:]` → 2022–2025 | `RULES_KERNEL4_END` (Step 5) |
 | `YEARS_SECONDARY_END` | `YEARS[-6:]` → 2020–2025 | `RULES_KERNEL6_SECONDARY_END` (Step 1b) |
 | `YEARS_SECONDARY_END_REVERT` | `YEARS[-4:]` → 2022–2025 | `RULES_KERNEL4_SECONDARY_END_REVERT` (Step 1b) |
-| `LAST_YEAR` | `YEARS[-1]` → 2025 | filtro espacial e pós-processamento |
+| `LAST_YEAR` | `YEARS[-1]` → 2025 | spatial filter and post-processing |
 
-No restante do documento, **n** designa o último ano da série (2025), **n-1** o penúltimo, e assim
-por diante. As regras são escritas em função de `n` porque a cauda se desloca a cada coleção — nada
-no código depende do ano 2025 literalmente.
+In the rest of this document, **n** denotes the last year of the series (2025), **n-1** the
+second-to-last, and so on. The rules are written in terms of `n` because the tail shifts with each
+collection — nothing in the code depends on the year 2025 literally.
 
 ---
 
-## 4. O parâmetro `min_start`
+## 4. The `min_start` parameter
 
-### Problema
+### Problem
 
-Algumas regras atribuem classe `3` (vegetação secundária) ou `5` (recuperação) na posição `t2`.
-Quando a janela deslizante começa no índice `i=0`, `t2` corresponde a **1986** — o segundo ano da
-série. Isso é incorreto, porque não existe contexto histórico antes de 1985 para confirmar que houve
-um estado antrópico ou secundário anterior.
+Some rules assign class `3` (secondary vegetation) or `5` (recovery) at position `t2`. When the
+sliding window starts at index `i=0`, `t2` corresponds to **1986** — the second year of the series.
+This is incorrect, because there is no historical context before 1985 to confirm that there was a
+prior anthropic or secondary state.
 
-### Critério de decisão
+### Decision criterion
 
-| Condição | `min_start` | Justificativa |
+| Condition | `min_start` | Rationale |
 |---|---|---|
-| `kernel_aft[1]` atribui classe `3` ou `5` (atribuição nova) | `1` | `t1` precisa representar um estado anterior confirmado; 1985 não tem histórico |
-| `kernel_aft[1]` já é classe `3` (sem atribuição nova) | `0` | `t2` já vinha com classe `3` da entrada; sem risco de atribuição falsa |
-| `kernel_aft` não atribui classe `3` nem `5` em lugar nenhum | `0` | nenhuma classe de vegetação secundária é escrita |
-| Regras com `years_override` na cauda | `0` | a janela nunca alcança 1985/1986 — o `years_override` já restringe o escopo |
+| `kernel_aft[1]` assigns class `3` or `5` (new assignment) | `1` | `t1` must represent a confirmed prior state; 1985 has no history |
+| `kernel_aft[1]` is already class `3` (no new assignment) | `0` | `t2` already had class `3` in the input; no risk of a false assignment |
+| `kernel_aft` assigns neither class `3` nor `5` anywhere | `0` | no secondary vegetation class is written |
+| Rules with `years_override` at the tail | `0` | the window never reaches 1985/1986 — `years_override` already restricts the scope |
 
-> `min_start=0` é sempre declarado **explicitamente**. Não é omissão: é a confirmação documentada de
-> que a regra foi avaliada e considerada segura desde o primeiro ano da série.
+> `min_start=0` is always declared **explicitly**. It is not an omission: it is the documented
+> confirmation that the rule was evaluated and deemed safe from the first year of the series.
 
-### Implementação
+### Implementation
 
-Os três métodos aplicam `min_start` da mesma forma: levantam `ValueError` se o terceiro elemento
-estiver ausente e somam `.And(i.gte(min_start))` à máscara de pixels.
+The three methods apply `min_start` in the same way: they raise `ValueError` if the third element
+is missing and add `.And(i.gte(min_start))` to the pixel mask.
 
 ```python
 def apply_rule_kernel_6(self, rule, years):
@@ -195,148 +195,151 @@ def apply_rule_kernel_6(self, rule, years):
             .And(t2.eq(kernel_bef[1]))
             ...
             .And(t6.eq(kernel_bef[5]))
-            .And(i.gte(min_start))   # bloqueia janelas antes do índice mínimo
+            .And(i.gte(min_start))   # blocks windows before the minimum index
         )
 ```
 
-A condição `.And(i.gte(min_start))` é uma expressão escalar do EE difundida para todos os pixels,
-sem custo computacional relevante.
+The `.And(i.gte(min_start))` condition is a scalar EE expression broadcast to all pixels, with no
+relevant computational cost.
 
 ---
 
-## 5. Ordem de processamento
+## 5. Processing order
 
-As regras são aplicadas **sequencialmente** em `export_deforestation()`.
+The rules are applied **sequentially** in `export_deforestation()`.
 
 ```python
-# Step 1  — agrega os códigos originais do MapBiomas para os códigos simplificados (0–7)
+# Step 1  — aggregates the original MapBiomas codes into the simplified codes (0–7)
 aggregated = DeforestationSecondaryVegetation.aggregate_classes(integration, LOOKUP_IN, LOOKUP_OUT)
 processor  = DeforestationSecondaryVegetation(aggregated, YEARS)
 
-# Step 1a — remove blips de 1 ano de vegetação (toda a série)          [RUN_VEG_BLIP_FILTER]
+# Step 1a — removes 1-year vegetation blips (whole series)              [RUN_VEG_BLIP_FILTER]
 processor.apply_rules(RULES_KERNEL3_VEG_BLIP, kernel_size=3)
 
-# Step 1b — regras ancoradas de fim de série (janelas de 6 e 4 anos)   [RUN_SECONDARY_END_RULES]
+# Step 1b — anchored end-of-series rules (6- and 4-year windows)        [RUN_SECONDARY_END_RULES]
 processor.apply_rules(RULES_KERNEL6_SECONDARY_END, kernel_size=6, years_override=YEARS_SECONDARY_END)
 processor.apply_rules(RULES_KERNEL4_SECONDARY_END_REVERT, kernel_size=4,
                       years_override=YEARS_SECONDARY_END_REVERT)
 
-# Step 2  — supressão confirmada de vegetação primária
+# Step 2  — confirmed primary vegetation suppression
 processor.apply_rules(RULES_KERNEL4, kernel_size=4)
 
-# Step 3  — dinâmica de vegetação secundária (estabelecimento, persistência, supressão)
+# Step 3  — secondary vegetation dynamics (establishment, persistence, suppression)
 processor.apply_rules(RULES_KERNEL4_SECONDARY, kernel_size=4)
 
-# Step 4  — supressão dentro de vegetação secundária
+# Step 4  — suppression within secondary vegetation
 processor.apply_rules(RULES_KERNEL3_SECONDARY, kernel_size=3)
 
-# Step 5  — transições não confirmadas no fim da série
+# Step 5  — unconfirmed transitions at the end of the series
 processor.apply_rules(RULES_KERNEL4_END, kernel_size=4, years_override=YEARS_END)
 
-# Step 6  — correção por frequência de antrópico
-# Step 7  — guarda de cauda (vegetação secundária não confirmada nos 2 últimos anos)
+# Step 6  — anthropic frequency correction
+# Step 7  — tail guard (unconfirmed secondary vegetation in the last 2 years)
 ```
 
-⚠️ **Steps 1a e 1b rodam primeiro, e isso é essencial.** Eles precisam ver o mapa agregado limpo
-(`{0,1,2,7}`), com antrópico(1) e vegetação(2) crus. Se rodassem depois dos Steps 2–4, o `p0` das
-janelas já teria sido reescrito para `{3,4,5,6}` — por exemplo `[4,1,1,1,1,2]` ou `[6,1,1,1,1,2]` — e
-a janela 3, que casa literalmente `[2,1,1,1,1,2]`, deixaria de casar. As marcas `5`/`3` escritas nos
-Steps 1a/1b sobrevivem a todas as regras seguintes (não casam nenhum `kernel_bef` downstream) e à
-correção de frequência, que só toca as classes 2 e 4.
+⚠️ **Steps 1a and 1b run first, and this is essential.** They need to see the clean aggregated map
+(`{0,1,2,7}`), with raw anthropic(1) and vegetation(2). If they ran after Steps 2–4, the windows'
+`p0` would already have been rewritten to `{3,4,5,6}` — for example `[4,1,1,1,1,2]` or
+`[6,1,1,1,1,2]` — and window 3, which literally matches `[2,1,1,1,1,2]`, would no longer match. The
+`5`/`3` marks written in Steps 1a/1b survive all subsequent rules (they match no downstream
+`kernel_bef`) and the frequency correction, which only touches classes 2 and 4.
 
 ---
 
-## 6. Grupos de regras
+## 6. Rule groups
 
-Apresentados **na ordem de execução**. Em todas as tabelas, `2 2 1 1` lê-se como a sequência de
-classes de `t1` a `tk`; a coluna "depois" traz o que é escrito quando o padrão casa.
+Presented **in execution order**. In all tables, `2 2 1 1` reads as the sequence of classes from
+`t1` to `tk`; the "after" column shows what is written when the pattern matches.
 
-### 6.1 `RULES_KERNEL3_VEG_BLIP` — filtro de blip de 1 ano (Step 1a)
+### 6.1 `RULES_KERNEL3_VEG_BLIP` — 1-year blip filter (Step 1a)
 
-**Kernel:** 3 anos · **Anos:** toda a série · **Flag:** `RUN_VEG_BLIP_FILTER` (default `True`)
+**Kernel:** 3 years · **Years:** whole series · **Flag:** `RUN_VEG_BLIP_FILTER` (default `True`)
 
-Um único ano de vegetação entre dois anos antrópicos não pode ser confirmado como vegetação
-secundária — o estabelecimento exige 3 anos — e é tratado como ruído, revertido para antrópico. Sem
-esse filtro, a correção por frequência (Step 6) promoveria esses blips a secundária(3) em toda a
-série.
+A single year of vegetation between two anthropic years cannot be confirmed as secondary
+vegetation — establishment requires 3 years — and is treated as noise, reverted to anthropic.
+Without this filter, the frequency correction (Step 6) would promote these blips to secondary(3)
+throughout the series.
 
 ```python
 RULES_KERNEL3_VEG_BLIP = [
-    [[1, 2, 1], [1, 1, 1], 0],  # antrópico, veg (1 ano), antrópico → antrópico
+    [[1, 2, 1], [1, 1, 1], 0],  # anthropic, veg (1 year), anthropic → anthropic
 ]
 ```
 
-| Regra | antes | → | depois | min_start |
+| Rule | before | → | after | min_start |
 |---|---|---|---|---|
-| Blip de 1 ano de vegetação | `1 2 1` | → | `1` **`1`** `1` | 0 |
+| 1-year vegetation blip | `1 2 1` | → | `1` **`1`** `1` | 0 |
 
-- `min_start=0` é seguro: a regra só escreve classe 1, nunca 3 ou 5.
-- **Não casa em `n`**: exige um ano antrópico depois da vegetação, que não existe no último ano. Por
-  construção, nunca toca uma regeneração em curso na ponta da série.
-- Roda primeiro para que o dado limpo alimente as janelas ancoradas — uma regeneração real continua
-  sendo detectada depois de o blip ser removido.
+- `min_start=0` is safe: the rule only writes class 1, never 3 or 5.
+- **Does not match at `n`**: it requires an anthropic year after the vegetation, which does not
+  exist in the last year. By construction, it never touches an ongoing regeneration at the end of
+  the series.
+- Runs first so that clean data feeds the anchored windows — a real regeneration is still detected
+  after the blip is removed.
 
-### 6.2 `RULES_KERNEL6_SECONDARY_END` — janelas ancoradas de fim de série (Step 1b)
+### 6.2 `RULES_KERNEL6_SECONDARY_END` — anchored end-of-series windows (Step 1b)
 
-**Kernel:** 6 anos · **Anos:** `YEARS_SECONDARY_END` (`YEARS[-6:]`, janela única) ·
+**Kernel:** 6 years · **Years:** `YEARS_SECONDARY_END` (`YEARS[-6:]`, single window) ·
 **Flag:** `RUN_SECONDARY_END_RULES` (default `True`)
 
-As regras de 4 anos exigem 3 anos seguidos de vegetação para confirmar o estabelecimento, então
-**não contemplam os 2 últimos anos** da série: uma regeneração que começa em `n` ou `n-1` não tem
-anos suficientes à frente para ser confirmada. Estas três janelas, ancoradas no intervalo
-`[n-5 .. n]`, resolvem esse caso usando o histórico **anterior** (4 a 5 anos antrópicos) como
-evidência no lugar da confirmação futura que não existe.
+The 4-year rules require 3 consecutive years of vegetation to confirm establishment, so they
+**do not cover the last 2 years** of the series: a regeneration starting at `n` or `n-1` does not
+have enough years ahead to be confirmed. These three windows, anchored on the interval
+`[n-5 .. n]`, solve this case by using the **prior** history (4 to 5 anthropic years) as evidence
+in place of the future confirmation that does not exist.
 
 ```python
 RULES_KERNEL6_SECONDARY_END = [
-    [[1, 1, 1, 1, 2, 2], [1, 1, 1, 1, 5, 3], 0],  # janela 1: 4 antrópico + 2 veg → 5,3
-    [[1, 1, 1, 1, 1, 2], [1, 1, 1, 1, 1, 5], 0],  # janela 2: 5 antrópico + 1 veg → 5
-    [[2, 1, 1, 1, 1, 2], [2, 1, 1, 1, 1, 5], 0],  # janela 3: veg + 4 antrópico + veg → 5
+    [[1, 1, 1, 1, 2, 2], [1, 1, 1, 1, 5, 3], 0],  # window 1: 4 anthropic + 2 veg → 5,3
+    [[1, 1, 1, 1, 1, 2], [1, 1, 1, 1, 1, 5], 0],  # window 2: 5 anthropic + 1 veg → 5
+    [[2, 1, 1, 1, 1, 2], [2, 1, 1, 1, 1, 5], 0],  # window 3: veg + 4 anthropic + veg → 5
 ]
 ```
 
-| Janela | antes (n-5 … n) | → | depois (n-5 … n) | min_start |
+| Window | before (n-5 … n) | → | after (n-5 … n) | min_start |
 |---|---|---|---|---|
-| 1 — 4 antrópicos + 2 anos de vegetação | `1 1 1 1 2 2` | → | `1 1 1 1` **`5 3`** | 0 |
-| 2 — 5 antrópicos + 1 ano de vegetação | `1 1 1 1 1 2` | → | `1 1 1 1 1` **`5`** | 0 |
-| 3 — vegetação + 4 antrópicos + vegetação | `2 1 1 1 1 2` | → | `2 1 1 1 1` **`5`** | 0 |
+| 1 — 4 anthropic + 2 years of vegetation | `1 1 1 1 2 2` | → | `1 1 1 1` **`5 3`** | 0 |
+| 2 — 5 anthropic + 1 year of vegetation | `1 1 1 1 1 2` | → | `1 1 1 1 1` **`5`** | 0 |
+| 3 — vegetation + 4 anthropic + vegetation | `2 1 1 1 1 2` | → | `2 1 1 1 1` **`5`** | 0 |
 
-> **`min_start=0` é seguro aqui.** Com `years_override=YEARS[-6:]` existe apenas a janela de índice 0,
-> que começa em `n-5` (2020) — com a série inteira de histórico antes dela. Não há risco de escrever
-> 3 ou 5 no início da série.
+> **`min_start=0` is safe here.** With `years_override=YEARS[-6:]` there is only the window at
+> index 0, which starts at `n-5` (2020) — with the whole series of history before it. There is no
+> risk of writing 3 or 5 at the beginning of the series.
 
-> **Janela 3 — efeito colateral aceito.** O `p0` (n-5) permanece vegetação(2) na regra, mas a
-> correção de frequência do Step 6 converte 2 → 3 para pixels com histórico antrópico (que a própria
-> janela garante), de modo que a cauda efetiva vira `[3,1,1,1,1,5]`. É semanticamente consistente — o
-> ano n-5 era mesmo vegetação secundária — e está aceito.
+> **Window 3 — accepted side effect.** The `p0` (n-5) remains vegetation(2) in the rule, but the
+> frequency correction of Step 6 converts 2 → 3 for pixels with anthropic history (which the window
+> itself guarantees), so the effective tail becomes `[3,1,1,1,1,5]`. This is semantically
+> consistent — year n-5 really was secondary vegetation — and is accepted.
 
-### 6.3 `RULES_KERNEL4_SECONDARY_END_REVERT` — reversão ancorada de bloco de 2 anos (Step 1b)
+### 6.3 `RULES_KERNEL4_SECONDARY_END_REVERT` — anchored reversal of a 2-year block (Step 1b)
 
-**Kernel:** 4 anos · **Anos:** `YEARS_SECONDARY_END_REVERT` (`YEARS[-4:]`) ·
-**Flag:** gated por `RUN_SECONDARY_END_RULES`
+**Kernel:** 4 years · **Years:** `YEARS_SECONDARY_END_REVERT` (`YEARS[-4:]`) ·
+**Flag:** gated by `RUN_SECONDARY_END_RULES`
 
-No **interior** da série, um bloco de 2 anos de vegetação seguido de antrópico já é revertido em duas
-etapas: `RULES_KERNEL4` marca a supressão (`[2,2,1,1]→[2,2,4,1]`) e `RULES_KERNEL4_SECONDARY` reverte
-tudo (`[1,2,2,4]→[1,1,1,1]`). Na **cauda**, a supressão não pode ser marcada — não existe ano depois
-de `n` para completar o padrão — e o bloco sobreviveria, sendo promovido a secundária(3) pela
-correção de frequência. Esta regra reproduz diretamente o resultado do interior.
+In the **interior** of the series, a 2-year block of vegetation followed by anthropic is already
+reverted in two steps: `RULES_KERNEL4` marks the suppression (`[2,2,1,1]→[2,2,4,1]`) and
+`RULES_KERNEL4_SECONDARY` reverts everything (`[1,2,2,4]→[1,1,1,1]`). At the **tail**, the
+suppression cannot be marked — there is no year after `n` to complete the pattern — and the block
+would survive, being promoted to secondary(3) by the frequency correction. This rule directly
+reproduces the interior result.
 
 ```python
 RULES_KERNEL4_SECONDARY_END_REVERT = [
-    [[1, 2, 2, 1], [1, 1, 1, 1], 0],  # antrópico, veg, veg, antrópico → tudo antrópico
+    [[1, 2, 2, 1], [1, 1, 1, 1], 0],  # anthropic, veg, veg, anthropic → all anthropic
 ]
 ```
 
-| Regra | antes | → | depois | min_start |
+| Rule | before | → | after | min_start |
 |---|---|---|---|---|
-| Bloco de 2 anos cortado antes de `n` | `1 2 2 1` | → | `1` **`1 1`** `1` | 0 |
+| 2-year block cut before `n` | `1 2 2 1` | → | `1` **`1 1`** `1` | 0 |
 
-⚠️ **É ancorada de propósito.** Uma versão global de `[1,2,2,1]` reverteria também blocos legítimos
-no interior da série, como `[1,2,2,1,2]`. Travado por `test_d_revert_does_not_revert_interior_1221`.
+⚠️ **It is anchored on purpose.** A global version of `[1,2,2,1]` would also revert legitimate
+blocks in the interior of the series, such as `[1,2,2,1,2]`. Locked by
+`test_d_revert_does_not_revert_interior_1221`.
 
-### 6.4 `RULES_KERNEL4` — supressão de vegetação primária (Step 2)
+### 6.4 `RULES_KERNEL4` — primary vegetation suppression (Step 2)
 
-**Kernel:** 4 anos · **Anos:** série completa (1985–2025) · nenhuma regra escreve 3 ou 5
+**Kernel:** 4 years · **Years:** full series (1985–2025) · no rule writes 3 or 5
 
 ```python
 RULES_KERNEL4 = [
@@ -344,55 +347,56 @@ RULES_KERNEL4 = [
 ]
 ```
 
-| Regra | antes | → | depois | min_start |
+| Rule | before | → | after | min_start |
 |---|---|---|---|---|
-| Supressão de vegetação primária | `2 2 1 1` | → | `2 2` **`4`** `1` | 0 |
+| Primary vegetation suppression | `2 2 1 1` | → | `2 2` **`4`** `1` | 0 |
 
-**Leitura:** se o pixel era vegetação primária (2) em dois anos consecutivos e passou a antrópico (1)
-por dois anos, o terceiro ano é marcado como supressão (4). A confirmação exige dois anos de uso
-antrópico para evitar falsos positivos por ruído de um único ano.
+**Reading:** if the pixel was primary vegetation (2) for two consecutive years and became
+anthropic (1) for two years, the third year is marked as suppression (4). Confirmation requires two
+years of anthropic use to avoid false positives from single-year noise.
 
-### 6.5 `RULES_KERNEL4_SECONDARY` — dinâmica de vegetação secundária (Step 3)
+### 6.5 `RULES_KERNEL4_SECONDARY` — secondary vegetation dynamics (Step 3)
 
-**Kernel:** 4 anos · **Anos:** série completa · **3 regras exigem `min_start=1`**
+**Kernel:** 4 years · **Years:** full series · **3 rules require `min_start=1`**
 
 ```python
 RULES_KERNEL4_SECONDARY = [
-    [[1, 2, 2, 2], [1, 5, 3, 3], 1],  # Estabelecimento de vegetação secundária
-    [[5, 3, 3, 2], [5, 3, 3, 3], 0],  # Recuperação → secundária: persistência
-    [[3, 2, 2, 2], [3, 3, 3, 3], 1],  # Persistência de vegetação secundária
-    [[3, 2, 2, 4], [3, 3, 3, 4], 1],  # Secundária com supressão no fim
-    [[3, 3, 2, 4], [3, 3, 3, 6], 0],  # Supressão com recuperação
-    [[3, 3, 2, 2], [3, 3, 3, 3], 0],  # Persistência com primária interrompida
-    [[3, 3, 3, 2], [3, 3, 3, 3], 0],  # Persistência: 3 anos confirmados
-    [[1, 2, 2, 4], [1, 1, 1, 1], 0],  # Supressão de primária com recuperação
+    [[1, 2, 2, 2], [1, 5, 3, 3], 1],  # Secondary vegetation establishment
+    [[5, 3, 3, 2], [5, 3, 3, 3], 0],  # Recovery → secondary: persistence
+    [[3, 2, 2, 2], [3, 3, 3, 3], 1],  # Secondary vegetation persistence
+    [[3, 2, 2, 4], [3, 3, 3, 4], 1],  # Secondary with suppression at the end
+    [[3, 3, 2, 4], [3, 3, 3, 6], 0],  # Suppression with recovery
+    [[3, 3, 2, 2], [3, 3, 3, 3], 0],  # Persistence with interrupted primary
+    [[3, 3, 3, 2], [3, 3, 3, 3], 0],  # Persistence: 3 confirmed years
+    [[1, 2, 2, 4], [1, 1, 1, 1], 0],  # Primary suppression with recovery
 ]
 ```
 
-| Regra | antes | → | depois | min_start | Observação |
+| Rule | before | → | after | min_start | Note |
 |---|---|---|---|---|---|
-| Estabelecimento de vegetação secundária | `1 2 2 2` | → | `1` **`5 3 3`** | **1** | ⚠️ t2 recebe classe 5 |
-| Recuperação → secundária: persistência | `5 3 3 2` | → | `5 3 3` **`3`** | 0 | t2 já é classe 3 |
-| Persistência de vegetação secundária | `3 2 2 2` | → | `3` **`3 3 3`** | **1** | ⚠️ t2 recebe classe 3 |
-| Secundária com supressão no fim | `3 2 2 4` | → | `3` **`3 3`** `4` | **1** | ⚠️ t2 recebe classe 3 |
-| Supressão com recuperação | `3 3 2 4` | → | `3 3` **`3 6`** | 0 | t2 já é classe 3 |
-| Persistência com primária interrompida | `3 3 2 2` | → | `3 3` **`3 3`** | 0 | t2 já é classe 3 |
-| Persistência: 3 anos confirmados | `3 3 3 2` | → | `3 3 3` **`3`** | 0 | t2 já é classe 3 |
-| Supressão de primária com recuperação | `1 2 2 4` | → | **`1 1 1 1`** | 0 | não escreve 3 nem 5 |
+| Secondary vegetation establishment | `1 2 2 2` | → | `1` **`5 3 3`** | **1** | ⚠️ t2 receives class 5 |
+| Recovery → secondary: persistence | `5 3 3 2` | → | `5 3 3` **`3`** | 0 | t2 is already class 3 |
+| Secondary vegetation persistence | `3 2 2 2` | → | `3` **`3 3 3`** | **1** | ⚠️ t2 receives class 3 |
+| Secondary with suppression at the end | `3 2 2 4` | → | `3` **`3 3`** `4` | **1** | ⚠️ t2 receives class 3 |
+| Suppression with recovery | `3 3 2 4` | → | `3 3` **`3 6`** | 0 | t2 is already class 3 |
+| Persistence with interrupted primary | `3 3 2 2` | → | `3 3` **`3 3`** | 0 | t2 is already class 3 |
+| Persistence: 3 confirmed years | `3 3 3 2` | → | `3 3 3` **`3`** | 0 | t2 is already class 3 |
+| Primary suppression with recovery | `1 2 2 4` | → | **`1 1 1 1`** | 0 | writes neither 3 nor 5 |
 
-**Leitura das regras ⚠️:**
+**Reading the ⚠️ rules:**
 
-- `[[1,2,2,2],[1,5,3,3],1]` — detecta `antrópico → vegetação → vegetação → vegetação` e interpreta a
-  vegetação como regeneração. Exige que `t1` seja um estado antrópico confirmado, o que 1985 não pode
-  oferecer. `min_start=1` garante que a primeira janela seja `[1986,1987,1988,1989]`. **É esta regra
-  que cobre uma regeneração iniciada em `n-2`** (ver [§8](#8-comportamento-no-fim-da-série)).
-- `[[3,2,2,2],[3,3,3,3],1]` — consolida como secundária toda a sequência. Para `t1=1985` ser classe 3,
-  uma regra anterior teria de tê-la escrito, o que é impossível no primeiro ano.
-- `[[3,2,2,4],[3,3,3,4],1]` — mesma justificativa, com evento de supressão em `t4`.
+- `[[1,2,2,2],[1,5,3,3],1]` — detects `anthropic → vegetation → vegetation → vegetation` and
+  interprets the vegetation as regeneration. It requires `t1` to be a confirmed anthropic state,
+  which 1985 cannot provide. `min_start=1` ensures the first window is `[1986,1987,1988,1989]`.
+  **This is the rule that covers a regeneration starting at `n-2`** (see
+  [§8](#8-end-of-series-behavior)).
+- `[[3,2,2,2],[3,3,3,3],1]` — consolidates the whole sequence as secondary. For `t1=1985` to be
+  class 3, a previous rule would have had to write it, which is impossible in the first year.
+- `[[3,2,2,4],[3,3,3,4],1]` — same rationale, with a suppression event at `t4`.
 
-### 6.6 `RULES_KERNEL3_SECONDARY` — supressão dentro de vegetação secundária (Step 4)
+### 6.6 `RULES_KERNEL3_SECONDARY` — suppression within secondary vegetation (Step 4)
 
-**Kernel:** 3 anos · **Anos:** série completa · nenhuma regra escreve 3 ou 5 em `t2`
+**Kernel:** 3 years · **Years:** full series · no rule writes 3 or 5 at `t2`
 
 ```python
 RULES_KERNEL3_SECONDARY = [
@@ -400,18 +404,18 @@ RULES_KERNEL3_SECONDARY = [
 ]
 ```
 
-| Regra | antes | → | depois | min_start |
+| Rule | before | → | after | min_start |
 |---|---|---|---|---|
-| Supressão de vegetação secundária | `3 4 1` | → | `3` **`6`** `1` | 0 |
+| Secondary vegetation suppression | `3 4 1` | → | `3` **`6`** `1` | 0 |
 
-**Leitura:** se o pixel era vegetação secundária (3), sofreu um evento marcado como supressão de
-primária (4) e voltou a antrópico (1), o evento é reclassificado como supressão de secundária (6).
-Este grupo depende da classe 3 em `t1`, escrita pelo Step 3 — com o `min_start` em vigor lá, a cadeia
-de dependência é segura.
+**Reading:** if the pixel was secondary vegetation (3), underwent an event marked as primary
+suppression (4) and returned to anthropic (1), the event is reclassified as secondary suppression
+(6). This group depends on class 3 in `t1`, written by Step 3 — with the `min_start` in force
+there, the dependency chain is safe.
 
-### 6.7 `RULES_KERNEL4_END` — transições não confirmadas no fim da série (Step 5)
+### 6.7 `RULES_KERNEL4_END` — unconfirmed transitions at the end of the series (Step 5)
 
-**Kernel:** 4 anos · **Anos:** `YEARS_END` (`YEARS[-4:]`, uma janela) · escreve apenas 4 ou 6 em `t4`
+**Kernel:** 4 years · **Years:** `YEARS_END` (`YEARS[-4:]`, one window) · writes only 4 or 6 at `t4`
 
 ```python
 RULES_KERNEL4_END = [
@@ -420,29 +424,29 @@ RULES_KERNEL4_END = [
 ]
 ```
 
-| Regra | antes | → | depois | min_start |
+| Rule | before | → | after | min_start |
 |---|---|---|---|---|
-| Desmatamento de primária não confirmado | `2 2 2 1` | → | `2 2 2` **`4`** | 0 |
-| Desmatamento de secundária não confirmado | `3 3 3 1` | → | `3 3 3` **`6`** | 0 |
+| Unconfirmed primary deforestation | `2 2 2 1` | → | `2 2 2` **`4`** | 0 |
+| Unconfirmed secondary deforestation | `3 3 3 1` | → | `3 3 3` **`6`** | 0 |
 
-**Leitura:** numa regra de desmatamento confirmado (`RULES_KERNEL4`), a transição exige dois anos de
-uso antrópico para evitar ruído. No fim da série, o segundo ano de confirmação ainda não existe.
-Estas regras marcam o último ano como supressão (4 ou 6) com base em um único ano antrópico,
-aceitando a confiança menor.
+**Reading:** in a confirmed deforestation rule (`RULES_KERNEL4`), the transition requires two years
+of anthropic use to avoid noise. At the end of the series, the second confirmation year does not
+exist yet. These rules mark the last year as suppression (4 or 6) based on a single anthropic
+year, accepting the lower confidence.
 
 ---
 
-## 7. Pós-processamento
+## 7. Post-processing
 
-### 7.1 Reclassificação por frequência de antrópico (Step 6)
+### 7.1 Reclassification by anthropic frequency (Step 6)
 
-Calcula a frequência de antrópico por pixel ao longo de todos os anos com `get_class_frequency()`,
-sobre a imagem **agregada** (antes das regras de kernel).
+Computes the per-pixel anthropic frequency across all years with `get_class_frequency()`, over the
+**aggregated** image (before the kernel rules).
 
-| Condição | Ação | Justificativa |
+| Condition | Action | Rationale |
 |---|---|---|
-| `freq_anthropic > 1` **e** pixel = classe `4` | → classe `6` | Se o pixel já foi antrópico mais de uma vez, uma supressão de primária é provavelmente de secundária |
-| `freq_anthropic > 0` **e** pixel = classe `2` | → classe `3` | Se o pixel tem qualquer histórico antrópico, a vegetação primária atual é provavelmente regeneração |
+| `freq_anthropic > 1` **and** pixel = class `4` | → class `6` | If the pixel has been anthropic more than once, a primary suppression is likely a secondary one |
+| `freq_anthropic > 0` **and** pixel = class `2` | → class `3` | If the pixel has any anthropic history, the current primary vegetation is likely regeneration |
 
 ```python
 freq_anthropic = DeforestationSecondaryVegetation.get_class_frequency(aggregated, class_id=1)
@@ -457,206 +461,209 @@ deforestation_transitions = deforestation_transitions.where(
 )
 ```
 
-> A correção **só toca as classes 2 e 4**. É por isso que as marcas 3 e 5 escritas pelas janelas
-> ancoradas do Step 1b atravessam essa etapa intactas.
+> The correction **only touches classes 2 and 4**. That is why the 3 and 5 marks written by the
+> anchored windows of Step 1b pass through this step intact.
 
-### 7.2 Guarda de cauda (Step 7) — substitui o ajuste dos últimos 3 anos
+### 7.2 Tail guard (Step 7) — replaces the last-3-years adjustment
 
-O bloco manual de pós-processamento dos últimos 3 anos (quatro ajustes condicionais) foi
-**removido**. Com as janelas ancoradas do Step 1b definindo a cauda de forma determinística, restou
-apenas uma guarda: remover vegetação secundária(3) cujo **predecessor imediato** seja antrópico(1) —
-ou seja, a regeneração não confirmada induzida pela correção de frequência.
+The manual post-processing block for the last 3 years (four conditional adjustments) was
+**removed**. With the anchored windows of Step 1b defining the tail deterministically, only one
+guard remained: remove secondary vegetation(3) whose **immediate predecessor** is anthropic(1) —
+that is, the unconfirmed regeneration induced by the frequency correction.
 
 ```python
 y1, y2, y3 = YEARS[-3], YEARS[-2], YEARS[-1]
 
-# n-1: remove secundária não confirmada (o predecessor n-2 é antrópico)
+# n-1: removes unconfirmed secondary (the predecessor n-2 is anthropic)
 t2 = t2.where(t1.eq(CLASS_ANTHROPIC).And(t2.eq(CLASS_SECONDARY_VEGETATION)), CLASS_ANTHROPIC)
 
-# n: idem — usa o t2 já atualizado, então a remoção cascateia por anos consecutivos
+# n: same — uses the already updated t2, so the removal cascades through consecutive years
 t3 = t3.where(t2.eq(CLASS_ANTHROPIC).And(t3.eq(CLASS_SECONDARY_VEGETATION)), CLASS_ANTHROPIC)
 ```
 
-- **Roda independentemente** de `RUN_SECONDARY_END_RULES`.
-- Preserva as saídas das janelas ancoradas (janela 1: `n-1`=5 e depois `n`=3 — o predecessor do 3 é
-  5, não 1) e os estabelecimentos confirmados (3 precedido de 3).
-- Remove apenas os `3` induzidos por frequência, que são ruído.
+- **Runs independently** of `RUN_SECONDARY_END_RULES`.
+- Preserves the outputs of the anchored windows (window 1: `n-1`=5 and then `n`=3 — the
+  predecessor of the 3 is 5, not 1) and confirmed establishments (3 preceded by 3).
+- Removes only the frequency-induced `3`s, which are noise.
 
-| Ajuste antigo (removido) | Como o caso é tratado hoje |
+| Old adjustment (removed) | How the case is handled today |
 |---|---|
-| `t1`=antrópico e `t2`=secundária → reverte `t2` | mantido, como a 1ª condição da guarda de cauda |
-| `t1`=antrópico e `t3`=secundária → reverte `t3` | coberto pelo cascateamento da 2ª condição |
-| `t2`=antrópico e `t3`=secundária → reverte `t3` | mantido, como a 2ª condição da guarda de cauda |
-| `t2`=secundária e `t3`=antrópico → reverte `t3` para secundária | **descartado** — reescrevia o último ano cegamente; a cauda agora é definida pelas janelas ancoradas |
+| `t1`=anthropic and `t2`=secondary → reverts `t2` | kept, as the 1st condition of the tail guard |
+| `t1`=anthropic and `t3`=secondary → reverts `t3` | covered by the cascading of the 2nd condition |
+| `t2`=anthropic and `t3`=secondary → reverts `t3` | kept, as the 2nd condition of the tail guard |
+| `t2`=secondary and `t3`=anthropic → reverts `t3` to secondary | **discarded** — it rewrote the last year blindly; the tail is now defined by the anchored windows |
 
 ---
 
-## 8. Comportamento no fim da série
+## 8. End-of-series behavior
 
-Para uma regeneração que começa perto do fim da série, o que sai no mapa? A matriz abaixo foi
-verificada por simulação do pipeline completo sobre a série 1985–2025 e está travada por testes
+For a regeneration that starts near the end of the series, what comes out on the map? The matrix
+below was verified by simulating the full pipeline over the 1985–2025 series and is locked by tests
 (`test_tail_coverage_matrix`).
 
-| Entrada (últimos 6 anos) | Situação | Saída (n-2, n-1, n) | Mecanismo |
+| Input (last 6 years) | Situation | Output (n-2, n-1, n) | Mechanism |
 |---|---|---|---|
-| `1 1 1 1 1 2` | regeneração começa em `n` (1 ano em curso) | `1 1 5` | janela 2 ou 3 (6 anos) |
-| `1 1 1 1 2 2` | começa em `n-1` (2 anos em curso) | `1 5 3` | janela 1 (6 anos) |
-| `1 1 1 2 2 2` | começa em `n-2` e alcança `n` (3 anos) | `5 3 3` | **regra de estabelecimento (4 anos)** |
-| `1 1 2 2 2 2` | começa em `n-3` (4 anos) | `3 3 3` | regra de estabelecimento (4 anos) |
-| `1 1 1 2 2 1` | bloco de 2 anos cortado antes de `n` | `1 1 1` | **reversão ancorada** ([§6.3](#63-rules_kernel4_secondary_end_revert--reversão-ancorada-de-bloco-de-2-anos-step-1b)) |
-| `1 1 1 2 1 1` | blip de 1 ano | `1 1 1` | **filtro de blip** ([§6.1](#61-rules_kernel3_veg_blip--filtro-de-blip-de-1-ano-step-1a)) |
+| `1 1 1 1 1 2` | regeneration starts at `n` (1 ongoing year) | `1 1 5` | window 2 or 3 (6 years) |
+| `1 1 1 1 2 2` | starts at `n-1` (2 ongoing years) | `1 5 3` | window 1 (6 years) |
+| `1 1 1 2 2 2` | starts at `n-2` and reaches `n` (3 years) | `5 3 3` | **establishment rule (4 years)** |
+| `1 1 2 2 2 2` | starts at `n-3` (4 years) | `3 3 3` | establishment rule (4 years) |
+| `1 1 1 2 2 1` | 2-year block cut before `n` | `1 1 1` | **anchored reversal** ([§6.3](#63-rules_kernel4_secondary_end_revert--anchored-reversal-of-a-2-year-block-step-1b)) |
+| `1 1 1 2 1 1` | 1-year blip | `1 1 1` | **blip filter** ([§6.1](#61-rules_kernel3_veg_blip--1-year-blip-filter-step-1a)) |
 
-As janelas de 6 anos são necessárias **apenas** para regenerações **em curso** que começam em `n` ou
-`n-1`. Uma regeneração que começa em `n-2` e chega a `n` já tem 3 anos de vegetação e é confirmada
-pela regra de estabelecimento de 4 anos — `n-2` **não** ficou esquecido.
+The 6-year windows are needed **only** for **ongoing** regenerations starting at `n` or `n-1`. A
+regeneration that starts at `n-2` and reaches `n` already has 3 years of vegetation and is
+confirmed by the 4-year establishment rule — `n-2` was **not** left out.
 
-Regenerações curtas que **terminam antes de `n`** são tratadas como ruído, espelhando o
-comportamento do interior da série: 2 anos cortados pela reversão ancorada, 1 ano pelo filtro de blip.
+Short regenerations that **end before `n`** are treated as noise, mirroring the behavior in the
+interior of the series: 2 years cut by the anchored reversal, 1 year by the blip filter.
 
-### 8.1 Flags de execução
+### 8.1 Execution flags
 
-| Flag | Default | O que controla | Efeito quando `False` |
+| Flag | Default | What it controls | Effect when `False` |
 |---|---|---|---|
-| `RUN_VEG_BLIP_FILTER` | `True` | Step 1a — filtro de blip de 1 ano em toda a série | blips sobrevivem e são promovidos a secundária(3) pela correção de frequência |
-| `RUN_SECONDARY_END_RULES` | `True` | Step 1b — janelas de 6 anos **e** reversão ancorada | a cauda volta ao comportamento anterior: blocos de 2 anos viram secundária; regeneração em curso em `n`/`n-1` não é detectada |
+| `RUN_VEG_BLIP_FILTER` | `True` | Step 1a — 1-year blip filter over the whole series | blips survive and are promoted to secondary(3) by the frequency correction |
+| `RUN_SECONDARY_END_RULES` | `True` | Step 1b — 6-year windows **and** anchored reversal | the tail reverts to the previous behavior: 2-year blocks become secondary; ongoing regeneration at `n`/`n-1` is not detected |
 
-A guarda de cauda (Step 7) **não** é controlada por flag — roda sempre. As duas flags existem para
-permitir reproduzir o comportamento anterior em comparações; travadas pelos testes `test_flag_*`.
+The tail guard (Step 7) is **not** controlled by a flag — it always runs. The two flags exist to
+allow reproducing the previous behavior in comparisons; locked by the `test_flag_*` tests.
 
 ---
 
-## 9. Validação e testes
+## 9. Validation and tests
 
-O código real é um grafo do Earth Engine e não roda offline.
-[`tests/test_rules.py`](../tests/test_rules.py) valida a **semântica das regras** com um simulador
-Python fiel do algoritmo de kernel — inclusive a aplicação sequencial, em que cada janela vê o
-resultado da anterior.
+The actual code is an Earth Engine graph and does not run offline.
+[`tests/test_rules.py`](../tests/test_rules.py) validates the **semantics of the rules** with a
+faithful Python simulator of the kernel algorithm — including sequential application, in which
+each window sees the result of the previous one.
 
 ```bash
-# a partir de collection11/
+# from collection11/
 python -m pytest tests -v
 ```
 
-**48 testes, todos passando** (verificado em 15/10/2026). Rodam offline, sem credencial do Earth Engine.
+**48 tests, all passing** (verified on 2026-10-15). They run offline, without Earth Engine
+credentials.
 
-| Grupo | O que cobre |
+| Group | What it covers |
 |---|---|
-| 1. Carga das regras via AST | Padrões literais de cada grupo |
-| 2. `apply_rule_kernel_6` | Janela única, não-casamento parcial, 3 janelas em sequência |
-| 3. `min_start` | Índice 0 aplica com 0; bloqueia com 1; libera no índice 1 |
-| 4. Filtro de blip | Remove 1 ano; preserva bloco de 2 anos; múltiplos blips; não casa em `n` |
-| 5. Reversão ancorada | Reverte na cauda; **não** reverte `[1,2,2,1]` no interior |
-| 6. Regra de estabelecimento | Casa no interior; bloqueada no início da série |
-| 7. Matriz de cobertura da cauda | Pipeline completo end-to-end para os 6 cenários da [§8](#8-comportamento-no-fim-da-série) |
-| 8. Flags | Comportamento antigo reproduzido com as flags desligadas |
-| 9. Ordenação run-first | As marcas 5/3 do Step 1b sobrevivem a KERNEL4 e KERNEL4_SECONDARY |
-| 10. Guarda de cauda | Remove 3 induzido por frequência; preserva recuperação(5) e 3 confirmado |
-| 11. Regressão | Série toda antrópica / toda vegetação; `min_start` ausente levanta erro |
+| 1. Loading rules via AST | Literal patterns of each group |
+| 2. `apply_rule_kernel_6` | Single window, partial non-match, 3 windows in sequence |
+| 3. `min_start` | Index 0 applies with 0; blocks with 1; allows at index 1 |
+| 4. Blip filter | Removes 1 year; preserves 2-year block; multiple blips; does not match at `n` |
+| 5. Anchored reversal | Reverts at the tail; does **not** revert `[1,2,2,1]` in the interior |
+| 6. Establishment rule | Matches in the interior; blocked at the start of the series |
+| 7. Tail coverage matrix | Full end-to-end pipeline for the 6 scenarios in [§8](#8-end-of-series-behavior) |
+| 8. Flags | Old behavior reproduced with the flags turned off |
+| 9. Run-first ordering | The 5/3 marks from Step 1b survive KERNEL4 and KERNEL4_SECONDARY |
+| 10. Tail guard | Removes frequency-induced 3; preserves recovery(5) and confirmed 3 |
+| 11. Regression | All-anthropic / all-vegetation series; missing `min_start` raises an error |
 
-> As regras são carregadas **do código-fonte via AST** (`load_rules_from_source`), sem importar o
-> pipeline — o que evita `ee.Initialize()` nos testes e garante que documento e testes descrevam as
-> mesmas constantes que rodam em produção.
+> The rules are loaded **from the source code via AST** (`load_rules_from_source`), without
+> importing the pipeline — which avoids `ee.Initialize()` in the tests and ensures that the
+> document and the tests describe the same constants that run in production.
 
 ---
 
-## 10. O que vem depois das regras temporais
+## 10. What comes after the temporal rules
 
-A imagem produzida por `export_deforestation()` é o primeiro elo. Os produtos abaixo derivam dela e
-ficam em `LAND-COVER/COLLECTION-11/DEFORESTATION/`.
+The image produced by `export_deforestation()` is the first link. The products below derive from it
+and live in `LAND-COVER/COLLECTION-11/DEFORESTATION/`.
 
-| Produto | Asset | Flag | Depende de |
+| Product | Asset | Flag | Depends on |
 |---|---|---|---|
-| Transições de desmatamento | `deforestation-secondary-vegetation` | `RUN_DEF` | integração |
-| Transições filtradas (filtro espacial) | `…-ft` | `RUN_DEF_FT` | transições |
-| Desmatamento anual | `…-annual` | `RUN_DEF_ANNUAL` | transições filtradas |
-| Desmatamento acumulado | `…-accumulated` | `RUN_DEF_ACCUMULATED` | anual |
-| Frequência de desmatamento | `deforestation-frequency` | `RUN_DEF_FREQUENCY` | transições filtradas |
-| Idade da vegetação secundária | `secondary-vegetation-age` | `RUN_SV_AGE` | transições filtradas |
+| Deforestation transitions | `deforestation-secondary-vegetation` | `RUN_DEF` | integration |
+| Filtered transitions (spatial filter) | `…-ft` | `RUN_DEF_FT` | transitions |
+| Annual deforestation | `…-annual` | `RUN_DEF_ANNUAL` | filtered transitions |
+| Accumulated deforestation | `…-accumulated` | `RUN_DEF_ACCUMULATED` | annual |
+| Deforestation frequency | `deforestation-frequency` | `RUN_DEF_FREQUENCY` | filtered transitions |
+| Secondary vegetation age | `secondary-vegetation-age` | `RUN_SV_AGE` | filtered transitions |
 
-**Filtro espacial:** `export_deforestation_filtered_no_accumulation()` remove, **ano a ano**,
-manchas de até `GROUP_SIZE_FILTER` (11 pixels, ~1 ha) por contagem de pixels conectados (8-vizinhança),
-reclassificando-as para a classe 7 (Other Transitions). Desmatamento (4, 6) e vegetação secundária
-(3, 5) são filtrados com máscaras separadas. `YEARS_EXCEPTION` (por padrão, só o último ano) permite
-um limiar próprio para os anos mais recentes — na C11, também 11.
+**Spatial filter:** `export_deforestation_filtered_no_accumulation()` removes, **year by year**,
+patches of up to `GROUP_SIZE_FILTER` (11 pixels, ~1 ha) by connected-pixel count (8-neighborhood),
+reclassifying them to class 7 (Other Transitions). Deforestation (4, 6) and secondary vegetation
+(3, 5) are filtered with separate masks. `YEARS_EXCEPTION` (by default, only the last year) allows a
+separate threshold for the most recent years — in C11, also 11.
 
-> É a função chamada por `run_pipeline()` desde a Collection 10 e a que gerou a C11. O script
-> mantém `export_deforestation_filtered()`, a variante anterior, que conta os pixels conectados
-> sobre a máscara **acumulada** da série inteira (uma mancha pequena num ano sobrevive se encostar
-> em desmatamento de outro ano); ela não é usada.
+> This is the function called by `run_pipeline()` since Collection 10 and the one that produced
+> C11. The script keeps `export_deforestation_filtered()`, the previous variant, which counts
+> connected pixels over the **accumulated** mask of the whole series (a small patch in one year
+> survives if it touches deforestation from another year); it is not used.
 
-**Idade da vegetação secundária:** acumula, por pixel, os anos consecutivos em classe 3 ou 5, zerando
-quando o pixel deixa essas classes — `age(t) = (age(t-1) + sv(t)) * sv(t)`. Bandas nomeadas
-`secondary_vegetation_age_{ano}`, **não** `classification_{ano}`, ao contrário dos outros assets do
-pipeline.
+**Secondary vegetation age:** accumulates, per pixel, the consecutive years in class 3 or 5,
+resetting to zero when the pixel leaves those classes — `age(t) = (age(t-1) + sv(t)) * sv(t)`.
+Bands are named `secondary_vegetation_age_{year}`, **not** `classification_{year}`, unlike the
+other assets of the pipeline.
 
-**Reuso em outras regiões:** Peru (C4), Bolívia (C4), Uruguai, Argentina (C3) e Indonésia (C5)
-usam **as mesmas sete listas de regras temporais**. O que difere é o `CLASS_LOOKUP`, específico da
-legenda de cada região, e o filtro espacial.
+**Reuse in other regions:** Peru (C4), Bolivia (C4), Uruguay, Argentina (C3) and Indonesia (C5)
+use **the same seven temporal rule lists**. What differs is the `CLASS_LOOKUP`, specific to each
+region's legend, and the spatial filter.
 
 ---
 
-## 11. Histórico de problemas resolvidos
+## 11. History of resolved problems
 
-### 11.1 Vegetação secundária nos primeiros anos da série
+### 11.1 Secondary vegetation in the first years of the series
 
-**Sintoma.** As classes `3` e `5` apareciam indevidamente no segundo ano da série (1986) — e, em
-alguns casos, também em 1985 — no mapa de desmatamento.
+**Symptom.** Classes `3` and `5` appeared improperly in the second year of the series (1986) — and,
+in some cases, also in 1985 — on the deforestation map.
 
-**Causa raiz.** As regras de `RULES_KERNEL4_SECONDARY` que atribuem 3 ou 5 na posição `t2` eram
-aplicadas a partir do índice `i=0`, correspondente a `[1985,1986,1987,1988]`. Nessa janela, `t2`=1986
-recebia 5 ou 3 sem que houvesse histórico antes de 1985 para validar a transição.
+**Root cause.** The `RULES_KERNEL4_SECONDARY` rules that assign 3 or 5 at position `t2` were
+applied starting at index `i=0`, corresponding to `[1985,1986,1987,1988]`. In that window,
+`t2`=1986 received 5 or 3 without any history before 1985 to validate the transition.
 
 ```python
-[[1, 2, 2, 2], [1, 5, 3, 3], ...]  →  t2 (1986) recebia classe 5
-[[3, 2, 2, 2], [3, 3, 3, 3], ...]  →  t2 (1986) recebia classe 3
-[[3, 2, 2, 4], [3, 3, 3, 4], ...]  →  t2 (1986) recebia classe 3
+[[1, 2, 2, 2], [1, 5, 3, 3], ...]  →  t2 (1986) received class 5
+[[3, 2, 2, 2], [3, 3, 3, 3], ...]  →  t2 (1986) received class 3
+[[3, 2, 2, 4], [3, 3, 3, 4], ...]  →  t2 (1986) received class 3
 ```
 
-**Correção.** Introdução do `min_start`, com valor `1` nas três regras afetadas: a janela mais antiga
-passa a ser `[1986,1987,1988,1989]`, com `t2`=1987. O parâmetro foi adicionado explicitamente com
-valor `0` em todas as demais regras, e sua ausência passou a levantar `ValueError`.
+**Fix.** Introduction of `min_start`, with value `1` in the three affected rules: the earliest
+window becomes `[1986,1987,1988,1989]`, with `t2`=1987. The parameter was added explicitly with
+value `0` to all other rules, and its absence now raises `ValueError`.
 
-### 11.2 Regeneração não detectada nos 2 últimos anos
+### 11.2 Regeneration not detected in the last 2 years
 
-**Sintoma.** Regenerações **em curso** — que começam em `n` ou `n-1` e ainda não têm 3 anos de
-vegetação — não apareciam no mapa, porque as regras de 4 anos exigem confirmação por 3 anos
-consecutivos. Ao mesmo tempo, ruídos curtos (1 ou 2 anos de vegetação) na cauda **eram** promovidos a
-vegetação secundária pela correção de frequência: falta o sinal real e sobra o ruído.
+**Symptom.** **Ongoing** regenerations — which start at `n` or `n-1` and do not yet have 3 years of
+vegetation — did not appear on the map, because the 4-year rules require confirmation over 3
+consecutive years. At the same time, short noise (1 or 2 years of vegetation) at the tail **was**
+promoted to secondary vegetation by the frequency correction: the real signal was missing and the
+noise remained.
 
-**Causa raiz.** O fim da série não tem os anos futuros que o restante da série usa como confirmação.
-O tratamento anterior era um bloco manual de quatro ajustes condicionais sobre os últimos 3 anos, que
-não distinguia regeneração em curso de ruído e chegava a reescrever o último ano cegamente.
+**Root cause.** The end of the series lacks the future years that the rest of the series uses as
+confirmation. The previous treatment was a manual block of four conditional adjustments over the
+last 3 years, which did not distinguish ongoing regeneration from noise and even rewrote the last
+year blindly.
 
-**Correção.**
+**Fix.**
 
-1. **Filtro de blip** ([§6.1](#61-rules_kernel3_veg_blip--filtro-de-blip-de-1-ano-step-1a)) — remove
-   1 ano isolado de vegetação em toda a série, antes de tudo.
-2. **Janelas ancoradas de 6 anos**
-   ([§6.2](#62-rules_kernel6_secondary_end--janelas-ancoradas-de-fim-de-série-step-1b)) — detectam
-   regeneração em curso em `n` e `n-1` usando o histórico anterior como evidência.
-3. **Reversão ancorada de bloco de 2 anos**
-   ([§6.3](#63-rules_kernel4_secondary_end_revert--reversão-ancorada-de-bloco-de-2-anos-step-1b)) —
-   reproduz na cauda o que o interior já fazia via supressão(4).
-4. **Guarda de cauda** ([§7.2](#72-guarda-de-cauda-step-7--substitui-o-ajuste-dos-últimos-3-anos)) —
-   substitui o bloco manual por uma única regra, baseada no predecessor imediato.
+1. **Blip filter** ([§6.1](#61-rules_kernel3_veg_blip--1-year-blip-filter-step-1a)) — removes an
+   isolated single year of vegetation throughout the series, before everything else.
+2. **Anchored 6-year windows**
+   ([§6.2](#62-rules_kernel6_secondary_end--anchored-end-of-series-windows-step-1b)) — detect
+   ongoing regeneration at `n` and `n-1` using the prior history as evidence.
+3. **Anchored reversal of a 2-year block**
+   ([§6.3](#63-rules_kernel4_secondary_end_revert--anchored-reversal-of-a-2-year-block-step-1b)) —
+   reproduces at the tail what the interior already did via suppression(4).
+4. **Tail guard** ([§7.2](#72-tail-guard-step-7--replaces-the-last-3-years-adjustment)) —
+   replaces the manual block with a single rule, based on the immediate predecessor.
 
-O resultado é a matriz de cobertura da [§8](#8-comportamento-no-fim-da-série), travada por testes. A
-ordem de execução — Steps 1a e 1b antes de tudo — é parte da correção, não um detalhe de
-implementação.
+The result is the coverage matrix in [§8](#8-end-of-series-behavior), locked by tests. The
+execution order — Steps 1a and 1b before everything else — is part of the fix, not an
+implementation detail.
 
 ---
 
-## 12. Referência rápida — todas as regras, em ordem de execução
+## 12. Quick reference — all rules, in execution order
 
-| # | Grupo | k | Anos | antes → depois | min_start |
+| # | Group | k | Years | before → after | min_start |
 |---|---|---|---|---|---|
-| 1a | `RULES_KERNEL3_VEG_BLIP` | 3 | todos | `1 2 1` → `1 1 1` | 0 |
+| 1a | `RULES_KERNEL3_VEG_BLIP` | 3 | all | `1 2 1` → `1 1 1` | 0 |
 | 1b | `RULES_KERNEL6_SECONDARY_END` | 6 | `YEARS[-6:]` | `1 1 1 1 2 2` → `1 1 1 1 5 3` | 0 |
 | | | | | `1 1 1 1 1 2` → `1 1 1 1 1 5` | 0 |
 | | | | | `2 1 1 1 1 2` → `2 1 1 1 1 5` | 0 |
 | 1b | `RULES_KERNEL4_SECONDARY_END_REVERT` | 4 | `YEARS[-4:]` | `1 2 2 1` → `1 1 1 1` | 0 |
-| 2 | `RULES_KERNEL4` | 4 | todos | `2 2 1 1` → `2 2 4 1` | 0 |
-| 3 | `RULES_KERNEL4_SECONDARY` | 4 | todos | `1 2 2 2` → `1 5 3 3` | **1** |
+| 2 | `RULES_KERNEL4` | 4 | all | `2 2 1 1` → `2 2 4 1` | 0 |
+| 3 | `RULES_KERNEL4_SECONDARY` | 4 | all | `1 2 2 2` → `1 5 3 3` | **1** |
 | | | | | `5 3 3 2` → `5 3 3 3` | 0 |
 | | | | | `3 2 2 2` → `3 3 3 3` | **1** |
 | | | | | `3 2 2 4` → `3 3 3 4` | **1** |
@@ -664,8 +671,8 @@ implementação.
 | | | | | `3 3 2 2` → `3 3 3 3` | 0 |
 | | | | | `3 3 3 2` → `3 3 3 3` | 0 |
 | | | | | `1 2 2 4` → `1 1 1 1` | 0 |
-| 4 | `RULES_KERNEL3_SECONDARY` | 3 | todos | `3 4 1` → `3 6 1` | 0 |
+| 4 | `RULES_KERNEL3_SECONDARY` | 3 | all | `3 4 1` → `3 6 1` | 0 |
 | 5 | `RULES_KERNEL4_END` | 4 | `YEARS[-4:]` | `2 2 2 1` → `2 2 2 4` | 0 |
 | | | | | `3 3 3 1` → `3 3 3 6` | 0 |
-| 6 | correção por frequência | — | todos | `freq>1 ∧ 4 → 6` · `freq>0 ∧ 2 → 3` | — |
-| 7 | guarda de cauda | — | `YEARS[-3:]` | `1` antes de `3` → `3` vira `1` (cascateia) | — |
+| 6 | frequency correction | — | all | `freq>1 ∧ 4 → 6` · `freq>0 ∧ 2 → 3` | — |
+| 7 | tail guard | — | `YEARS[-3:]` | `1` before `3` → `3` becomes `1` (cascades) | — |

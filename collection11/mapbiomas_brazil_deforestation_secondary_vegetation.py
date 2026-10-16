@@ -55,7 +55,7 @@ except Exception:
 # GENERAL SCRIPT CONFIGURATION
 # ==============================
 
-# Região e coleção
+# Region and collection
 REGION_NAME = 'brazil'
 REGION_ISO3 = 'BRA'
 COLLECTION_ID = 11
@@ -224,14 +224,14 @@ RULES_KERNEL4_END = [
 
 # Rules for secondary vegetation establishment (4-year patterns)
 RULES_KERNEL4_SECONDARY = [
-    [[1, 2, 2, 2], [1, 5, 3, 3], 1], # Establishment of secondary vegetation | t2 recebe 5: precisa de histórico antes de 1985
-    [[5, 3, 3, 2], [5, 3, 3, 3], 0], # Recovery to secondary vegetation | t2 já é 3, sem risco
-    [[3, 2, 2, 2], [3, 3, 3, 3], 1], # Secondary vegetation persistence | t2 recebe 3: mesmo motivo da regra 1
-    [[3, 2, 2, 4], [3, 3, 3, 4], 1], # Suppression of secondary vegetation | t2 recebe 3: mesmo motivo
-    [[3, 3, 2, 4], [3, 3, 3, 6], 0], # Suppression of secondary vegetation with recovery | t2 já é 3, sem risco
-    [[3, 3, 2, 2], [3, 3, 3, 3], 0], # Suppression of secondary vegetation with persistence | t2 já é 3, sem risco
-    [[3, 3, 3, 2], [3, 3, 3, 3], 0], # Suppression of secondary vegetation with persistence | t2 já é 3, sem risco
-    [[1, 2, 2, 4], [1, 1, 1, 1], 0], # Suppression of primary vegetation with recovery | não escreve 3 ou 5, sem risco
+    [[1, 2, 2, 2], [1, 5, 3, 3], 1], # Establishment of secondary vegetation | writes 5 at t2: needs history before 1985
+    [[5, 3, 3, 2], [5, 3, 3, 3], 0], # Recovery to secondary vegetation | t2 is already 3, no risk
+    [[3, 2, 2, 2], [3, 3, 3, 3], 1], # Secondary vegetation persistence | writes 3 at t2: same reason as rule 1
+    [[3, 2, 2, 4], [3, 3, 3, 4], 1], # Suppression of secondary vegetation | writes 3 at t2: same reason
+    [[3, 3, 2, 4], [3, 3, 3, 6], 0], # Suppression of secondary vegetation with recovery | t2 is already 3, no risk
+    [[3, 3, 2, 2], [3, 3, 3, 3], 0], # Suppression of secondary vegetation with persistence | t2 is already 3, no risk
+    [[3, 3, 3, 2], [3, 3, 3, 3], 0], # Suppression of secondary vegetation with persistence | t2 is already 3, no risk
+    [[1, 2, 2, 4], [1, 1, 1, 1], 0], # Suppression of primary vegetation with recovery | writes neither 3 nor 5, no risk
 ]
 
 # Rules for deforestation in secondary vegetation (3-year patterns)
@@ -248,22 +248,22 @@ YEARS_SECONDARY_END = YEARS[-6:]
 # which the 4-year rules cannot confirm (they need 3 consecutive vegetation years).
 # min_start=0 is safe here: the window starts at n-5 (2020), which has full history
 # before it — there is no risk of writing class 3/5 at the start of the series.
-# NOTE (janela 3): p0 (n-5) stays vegetation(2) in the rule, but the global
+# NOTE (window 3): p0 (n-5) stays vegetation(2) in the rule, but the global
 # frequency correction later converts leftover 2->3 for pixels with prior anthropic
 # (which the window guarantees), so the effective tail becomes [3,1,1,1,1,5].
 # This is semantically consistent (n-5 was secondary vegetation) and accepted.
 RULES_KERNEL6_SECONDARY_END = [
-    # janela 1: 4 antrópico + 2 vegetação → recuperação(5) em n-1, secundária(3) em n
+    # window 1: 4 anthropic + 2 vegetation → recovery(5) at n-1, secondary(3) at n
     [[1, 1, 1, 1, 2, 2], [1, 1, 1, 1, 5, 3], 0],
-    # janela 2: 5 antrópico + 1 vegetação → recuperação(5) em n
+    # window 2: 5 anthropic + 1 vegetation → recovery(5) at n
     [[1, 1, 1, 1, 1, 2], [1, 1, 1, 1, 1, 5], 0],
-    # janela 3: vegetação + 4 antrópico + vegetação → recuperação(5) em n
+    # window 3: vegetation + 4 anthropic + vegetation → recovery(5) at n
     [[2, 1, 1, 1, 1, 2], [2, 1, 1, 1, 1, 5], 0],
 ]
 
-# Liga/desliga a detecção ancorada de fim de série (janelas de 6 anos), permitindo
-# que o usuário escolha aplicar ou não essas regras. A guarda de cauda (Step 7 em
-# export_deforestation) roda independentemente desta flag.
+# Turns the anchored end-of-series detection (6-year windows) on or off, so the user
+# can choose whether to apply these rules. The tail guard (Step 7 in
+# export_deforestation) runs regardless of this flag.
 RUN_SECONDARY_END_RULES = True
 
 # Anchored end-of-series revert (last 4 years, [n-3..n]). In the interior of the
@@ -276,7 +276,7 @@ RUN_SECONDARY_END_RULES = True
 # on purpose: a global [1,2,2,1] would also revert interior [1,2,2,1,2] blocks.
 YEARS_SECONDARY_END_REVERT = YEARS[-4:]
 RULES_KERNEL4_SECONDARY_END_REVERT = [
-    [[1, 2, 2, 1], [1, 1, 1, 1], 0],  # antrópico, veg, veg, antrópico → tudo antrópico
+    [[1, 2, 2, 1], [1, 1, 1, 1], 0],  # anthropic, veg, veg, anthropic → all anthropic
 ]
 
 # General 1-year vegetation blip filter (all years). A single vegetation year between
@@ -287,7 +287,7 @@ RULES_KERNEL4_SECONDARY_END_REVERT = [
 # after the vegetation), so it never touches an ongoing regeneration at the tail.
 RUN_VEG_BLIP_FILTER = True
 RULES_KERNEL3_VEG_BLIP = [
-    [[1, 2, 1], [1, 1, 1], 0],  # antrópico, veg (1 ano), antrópico → antrópico
+    [[1, 2, 1], [1, 1, 1], 0],  # anthropic, veg (1 year), anthropic → anthropic
 ]
 
 # ================================
@@ -1112,7 +1112,7 @@ def export_deforestation():
     # last-3-years post-processing: when enabled, the anchored 6-year rules (Step 1b)
     # define the tail deterministically. Here we only strip secondary vegetation(3)
     # whose IMMEDIATE predecessor is anthropic(1) — i.e. frequency-induced, unconfirmed
-    # regeneration. Sequences written by the anchored rules (janela 1: n-1=5 then n=3;
+    # regeneration. Sequences written by the anchored rules (window 1: n-1=5 then n=3;
     # janelas 2/3: n=5) and confirmed establishments (3 preceded by 3) are preserved,
     # since their predecessor is not anthropic.
     y1, y2, y3 = YEARS[-3], YEARS[-2], YEARS[-1]
@@ -1380,16 +1380,16 @@ def export_deforestation_accumulated():
         .min()
     )
 
-    # Transições codificadas como XX, onde XX // 100 = classe (e.g., 400, 600, 300, 500)
+    # Transitions encoded as XXX, where XXX // 100 = class (e.g., 400, 600, 300, 500)
     transitions = image.divide(100).byte()
 
-    # Máscaras booleanas para cada tipo de classe
+    # Boolean masks for each class type
     deforestation_pv_mask = transitions.eq(CLASS_PRIMARY_VEG_SUPPRESSION)
     deforestation_sv_mask = transitions.eq(CLASS_SECONDARY_VEG_SUPPRESSION)
     secondary_veg_mask = transitions.eq(CLASS_SECONDARY_VEGETATION)
     secondary_veg_recovery_mask = transitions.eq(CLASS_RECOVERY_TO_SECONDARY)
 
-    # Lista de períodos (ex: [(1985, 1990), (1991, 2000), ...])
+    # List of periods (e.g. [(1985, 1990), (1991, 2000), ...])
     periods = ee.List(PERIODS_ALL_YEARS)
 
     def process_period(p, image_acc):
@@ -1441,10 +1441,10 @@ def export_deforestation_accumulated():
 
         return ee.Image(image_acc).addBands(deforestation_acc).addBands(secondary_veg_acc)
 
-    # Aplica a função em todos os períodos
+    # Apply the function to every period
     accum_images = periods.iterate(process_period, ee.Image().select())
 
-    # Concatena todas as bandas geradas
+    # Concatenate all generated bands
     result = ee.Image(accum_images).selfMask()
 
     return export_by_grid(
@@ -1474,30 +1474,30 @@ def export_deforestation_frequency():
         image.eq(CLASS_SECONDARY_VEG_SUPPRESSION)
     )
 
-    # Converte a lista de períodos em ee.List para map
+    # Convert the list of periods to ee.List for iterate
     periods = ee.List(PERIODS_ALL_YEARS)
 
     def compute_frequency(period, image_freq):
-        # Extrai start e end do par de anos
+        # Extract start and end from the year pair
         period = ee.List(period)
         start = ee.Number(period.get(0))
         end = ee.Number(period.get(1))
 
-        # Lista de bandas para o período
+        # List of bands for the period
         bands = ee.List.sequence(start, end).map(lambda y: ee.String(BAND_PREFIX).cat(ee.Number(y).format('%.0f')))
         
-        # Reduz soma das bandas selecionadas e renomeia a banda com o padrão desejado
+        # Sum the selected bands and rename the band with the expected pattern
         freq = mask.select(bands).reduce(ee.Reducer.sum()).rename(
             ee.String(FREQ_BAND_PATTERN).replace('{start}', start.format('%.0f')).replace('{end}', end.format('%.0f'))
         )
 
         return ee.Image(image_freq).addBands(freq)
 
-    # Aplica map para calcular a frequência por período
+    # Compute the frequency for each period
     freq_list = periods.iterate(compute_frequency, ee.Image().select())
 
-    # Concatena as bandas em uma única imagem e aplica selfMask. A soma de máscaras sai
-    # int64; o máximo é o número de anos do período (39), então cabe em uint8.
+    # Concatenate the bands into one image and apply selfMask. The sum of masks comes out
+    # int64; the maximum is the number of years in the period (39), so it fits in uint8.
     result = ee.Image(freq_list).selfMask().toUint8()
 
     return export_by_grid(
@@ -1516,7 +1516,7 @@ def export_secondary_vegetation_age():
     The age increases each year a pixel remains in class 3 or 5 (secondary vegetation or recovery).
     Resets to zero when pixel exits these classes.
     """
-    # Carrega imagem de transições e gera máscara binária para classes 3 e 5
+    # Load the transitions image and build a binary mask for classes 3 and 5
     transitions = (
         ee.ImageCollection(ASSET_DEF_SEC_VEG_FT)
         .filter(ee.Filter.eq("version", VERSION_OUTPUT_DEF_SEC_VEG_FT))
@@ -1527,10 +1527,10 @@ def export_secondary_vegetation_age():
         transitions.eq(CLASS_RECOVERY_TO_SECONDARY)
     )
 
-    # Acumula a idade com um loop client-side: YEARS é uma lista Python conhecida em
-    # tempo de construção do grafo, então não há motivo para iterate/ee.Algorithms.If
-    # server-side (a versão anterior quebrava no índice 0, porque ee.List.get(-1) dá a
-    # volta e retornava o último ano, selecionando uma banda inexistente na imagem vazia).
+    # Accumulate the age with a client-side loop: YEARS is a Python list known when the
+    # graph is built, so there is no reason for a server-side iterate/ee.Algorithms.If
+    # (the previous version broke at index 0, because ee.List.get(-1) wraps around and
+    # returned the last year, selecting a band that does not exist in the empty image).
     age_bands = []
     previous_age = None
 
@@ -1541,13 +1541,13 @@ def export_secondary_vegetation_age():
             age = sv_year
         else:
             # age(t) = (age(t-1) + sv(t)) * sv(t)
-            # zera quando o pixel deixa de ser vegetação secundária
+            # resets to zero when the pixel stops being secondary vegetation
             age = previous_age.add(sv_year).multiply(sv_year)
 
         age_bands.append(age.rename(AGE_BAND_PATTERN.format(year=year)))
         previous_age = age
 
-    # Idade máxima = len(YEARS) anos, cabe em uint8
+    # Maximum age = len(YEARS) years, fits in uint8
     age_image = ee.Image.cat(age_bands).toUint8()
 
     return export_by_grid(
