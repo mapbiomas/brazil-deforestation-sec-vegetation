@@ -11,6 +11,12 @@ pixel.
 
 Start with [Collection 11](collection11/README.md).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="collection11/docs/figures/method-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="collection11/docs/figures/method-light.png">
+  <img alt="Collection 11 method: land cover input, aggregation into three states, temporal rules, post-processing and spatial filter, with an example pixel over 41 years, the rule catalogue and the outputs" src="collection11/docs/figures/method-light.png">
+</picture>
+
 ## Classes
 
 | Code | Class |
